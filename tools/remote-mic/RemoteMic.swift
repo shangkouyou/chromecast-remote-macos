@@ -1,0 +1,483 @@
+import AVFoundation
+import CoreAudio
+import Foundation
+
+// MARK: - CoreAudio helpers
+
+func deviceName(_ id: AudioDeviceID) -> String {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioObjectPropertyName,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var name: CFString = "" as CFString
+    var size = UInt32(MemoryLayout<CFString>.size)
+    let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &name)
+    return status == noErr ? (name as String) : "?"
+}
+
+func allDevices() -> [AudioDeviceID] {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else {
+        return []
+    }
+    let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+    var ids = [AudioDeviceID](repeating: 0, count: count)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &ids) == noErr else {
+        return []
+    }
+    return ids
+}
+
+func channelCount(_ id: AudioDeviceID, scope: AudioObjectPropertyScope) -> Int {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr, size > 0 else {
+        return 0
+    }
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+    defer { raw.deallocate() }
+    guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, raw) == noErr else { return 0 }
+    let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+    return list.reduce(0) { $0 + Int($1.mNumberChannels) }
+}
+
+func findDevice(contains needle: String) -> AudioDeviceID? {
+    for id in allDevices() {
+        let name = deviceName(id)
+        if name.localizedCaseInsensitiveContains(needle) {
+            return id
+        }
+    }
+    return nil
+}
+
+// MARK: - ATVV decoder (IMA/DVI ADPCM)
+
+final class ATVVDecoder {
+    private let stepTable: [Int] = [
+        7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
+        34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130,
+        143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449,
+        494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411,
+        1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026,
+        4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442,
+        11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623,
+        27086, 29794, 32767,
+    ]
+    private let indexTable = [-1, -1, -1, -1, 2, 4, 6, 8]
+
+    private var predictor = 0
+    private var stepIndex = 0
+    private var pending = [UInt8]()
+    private var previousInput: Double = 0
+    private var previousOutput: Double = 0
+    private var filterInitialized = false
+    private let alpha: Double
+    let frameSize: Int
+
+    init(frameSize: Int = 120, sampleRate: Double = 16000) {
+        self.frameSize = frameSize
+        self.alpha = exp(-2.0 * Double.pi * 20.0 / sampleRate)
+    }
+
+    func reset(predictor: Int = 0, stepIndex: Int = 0) {
+        self.predictor = min(32767, max(-32768, predictor))
+        self.stepIndex = min(88, max(0, stepIndex))
+        pending.removeAll()
+        previousInput = 0
+        previousOutput = 0
+        filterInitialized = false
+    }
+
+    func feed(_ data: [UInt8]) -> [Int16] {
+        pending.append(contentsOf: data)
+        var samples: [Int16] = []
+        while pending.count >= frameSize {
+            let frame = Array(pending[0..<frameSize])
+            pending.removeFirst(frameSize)
+            samples.append(contentsOf: decodeFrame(frame))
+        }
+        return samples
+    }
+
+    private func decodeFrame(_ frame: [UInt8]) -> [Int16] {
+        var out: [Int16] = []
+        out.reserveCapacity(frame.count * 2)
+        for byte in frame {
+            out.append(decodeNibble(Int(byte >> 4)))
+            out.append(decodeNibble(Int(byte & 0x0F)))
+        }
+        return postprocess(out)
+    }
+
+    private func decodeNibble(_ nibble: Int) -> Int16 {
+        let step = stepTable[stepIndex]
+        var difference = step >> 3
+        if nibble & 1 != 0 { difference += step >> 2 }
+        if nibble & 2 != 0 { difference += step >> 1 }
+        if nibble & 4 != 0 { difference += step }
+
+        if nibble & 8 != 0 {
+            predictor -= difference
+        } else {
+            predictor += difference
+        }
+        predictor = min(32767, max(-32768, predictor))
+        stepIndex += indexTable[nibble & 7]
+        stepIndex = min(88, max(0, stepIndex))
+        return Int16(predictor)
+    }
+
+    private func postprocess(_ input: [Int16]) -> [Int16] {
+        guard !input.isEmpty else { return [] }
+        if !filterInitialized {
+            previousInput = Double(input[0])
+            filterInitialized = true
+        }
+        let gain = pow(10.0, 10.0 / 20.0)
+        var filtered = [Double]()
+        filtered.reserveCapacity(input.count)
+        for sample in input {
+            let current = Double(sample)
+            let output = current - previousInput + alpha * previousOutput
+            previousInput = current
+            previousOutput = output
+            filtered.append(output * gain)
+        }
+        // 3-tap smoothing, same idea as the reference postprocessor.
+        var result = filtered
+        if filtered.count >= 3 {
+            for i in 1..<(filtered.count - 1) {
+                result[i] = (filtered[i - 1] + 2 * filtered[i] + filtered[i + 1]) / 4
+            }
+        }
+        return result.map { Int16(min(32767, max(-32768, Int($0.rounded())))) }
+    }
+}
+
+// MARK: - Audio output to BlackHole
+
+final class VirtualMicOutput {
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private let format: AVAudioFormat
+    private let queue = DispatchQueue(label: "remote-mic.audio")
+    private var started = false
+    private var prebuffer: [Int16] = []
+    private let prebufferFrames = 4800  // 300 ms @ 16 kHz
+    private(set) var deviceID: AudioDeviceID = 0
+    private(set) var totalSamples = 0
+
+    init(device: AudioDeviceID) throws {
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                         sampleRate: 16000, channels: 1,
+                                         interleaved: false) else {
+            throw NSError(domain: "RemoteMic", code: 1)
+        }
+        self.format = format
+        self.deviceID = device
+        log("audio: attach")
+        engine.attach(player)
+        log("audio: connect")
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        log("audio: outputNode")
+        let unit = engine.outputNode.audioUnit
+        log("audio: unit=\(unit != nil)")
+        var dev = device
+        let status = AudioUnitSetProperty(
+            unit!,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0,
+            &dev, UInt32(MemoryLayout<AudioDeviceID>.size))
+        log("audio: set device status=\(status)")
+        if status != noErr {
+            throw NSError(domain: "RemoteMic", code: Int(status),
+                          userInfo: [NSLocalizedDescriptionKey: "无法把音频输出切到虚拟设备（\(status)）"])
+        }
+        engine.prepare()
+        log("audio: prepared")
+        try engine.start()
+        log("audio: started")
+        started = true
+        player.play()
+    }
+
+    func push(_ samples: [Int16]) {
+        guard !samples.isEmpty else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.totalSamples += samples.count
+            if !self.player.isPlaying {
+                self.player.play()
+            }
+            self.prebuffer.append(contentsOf: samples)
+            if self.prebuffer.count >= self.prebufferFrames {
+                let chunk = self.prebuffer
+                self.prebuffer.removeAll(keepingCapacity: true)
+                self.schedule(chunk)
+            }
+        }
+    }
+
+    func flush() {
+        queue.async { [weak self] in
+            guard let self, !self.prebuffer.isEmpty else { return }
+            let chunk = self.prebuffer
+            self.prebuffer.removeAll(keepingCapacity: true)
+            self.schedule(chunk)
+        }
+    }
+
+    private func schedule(_ samples: [Int16]) {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: AVAudioFrameCount(samples.count)) else { return }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        if let channel = buffer.floatChannelData?[0] {
+            for (index, sample) in samples.enumerated() {
+                channel[index] = Float(sample) / 32768.0
+            }
+        }
+        player.scheduleBuffer(buffer, completionHandler: nil)
+    }
+
+    func stop() {
+        queue.sync {
+            flush()
+        }
+        player.stop()
+        engine.stop()
+        started = false
+    }
+}
+
+// MARK: - Log capture
+
+final class VoiceLogSource {
+    var onControl: (([UInt8]) -> Void)?
+    var onAudio: (([UInt8]) -> Void)?
+    private var process: Process?
+    private var buffer = ""
+    private let pattern = try! NSRegularExpression(
+        pattern: #"0x(003C|003F) Characteristic Value \[\s*([0-9A-Fa-f ]+?)\s*\]"#)
+
+    func start() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        task.arguments = [
+            "stream", "--style", "compact", "--predicate",
+            "subsystem == \"com.apple.bluetooth\" AND (eventMessage CONTAINS \"0x003C Characteristic Value\" OR eventMessage CONTAINS \"0x003F Characteristic Value\")",
+        ]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            self?.feed(text)
+        }
+        try? task.run()
+        process = task
+    }
+
+    func stop() {
+        process?.terminate()
+        process = nil
+    }
+
+    private func feed(_ text: String) {
+        buffer += text
+        while let newline = buffer.firstIndex(of: "\n") {
+            let line = String(buffer[buffer.startIndex..<newline])
+            buffer = String(buffer[buffer.index(after: newline)...])
+            parse(line)
+        }
+        if buffer.count > 16384 { buffer = "" }
+    }
+
+    private func parse(_ line: String) {
+        let text = line as NSString
+        guard let match = pattern.firstMatch(in: line, range: NSRange(location: 0, length: text.length)) else {
+            return
+        }
+        let handle = text.substring(with: match.range(at: 1))
+        let hex = text.substring(with: match.range(at: 2))
+        let bytes = hex.split(whereSeparator: { $0 == " " }).compactMap { UInt8($0, radix: 16) }
+        guard !bytes.isEmpty else { return }
+        if handle == "003C" {
+            onAudio?(bytes)
+        } else {
+            onControl?(bytes)
+        }
+    }
+}
+
+// MARK: - Main
+
+struct Options {
+    var list = false
+    var tone = false
+    var duration: Double = 0
+    var deviceName = "BlackHole 2ch"
+}
+
+func parseOptions() -> Options {
+    var options = Options()
+    let args = CommandLine.arguments
+    var index = 1
+    while index < args.count {
+        switch args[index] {
+        case "--list": options.list = true
+        case "--tone": options.tone = true
+        case "--duration": index += 1; options.duration = Double(args[index]) ?? 0
+        case "--device": index += 1; options.deviceName = args[index]
+        default: break
+        }
+        index += 1
+    }
+    return options
+}
+
+func timestamp() -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss.SSS"
+    return formatter.string(from: Date())
+}
+
+func log(_ message: String) {
+    let line = "[\(timestamp())] \(message)"
+    print(line)
+    fflush(stdout)
+    let url = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/RemoteMic.log")
+    if let handle = try? FileHandle(forWritingTo: url) {
+        handle.seekToEndOfFile()
+        handle.write((line + "\n").data(using: .utf8)!)
+        try? handle.close()
+    } else {
+        try? (line + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+let options = parseOptions()
+if options.list {
+    for id in allDevices() {
+        let input = channelCount(id, scope: kAudioObjectPropertyScopeInput)
+        let output = channelCount(id, scope: kAudioObjectPropertyScopeOutput)
+        if input > 0 || output > 0 {
+            print(String(format: "%7u  in:%d out:%d  %@", id, input, output, deviceName(id)))
+        }
+    }
+    exit(0)
+}
+
+guard let device = findDevice(contains: options.deviceName) else {
+    log("找不到虚拟音频设备（名称包含 \(options.deviceName)）。用 --list 查看。")
+    exit(1)
+}
+log("虚拟设备：\(deviceName(device)) (id \(device))")
+
+let output: VirtualMicOutput
+do {
+    output = try VirtualMicOutput(device: device)
+} catch {
+    log("音频输出启动失败：\(error.localizedDescription)")
+    exit(1)
+}
+
+if options.tone {
+    let seconds = options.duration > 0 ? options.duration : 1.5
+    let count = Int(16000 * seconds)
+    var tone = [Int16](repeating: 0, count: count)
+    for i in 0..<count {
+        tone[i] = Int16(6000 * sin(2 * Double.pi * 440 * Double(i) / 16000))
+    }
+    log("播放 \(seconds) 秒 440Hz 测试音到 \(deviceName(device))，同时请用输入设备监听…")
+    // 直接按 20ms 一块送入
+    var index = 0
+    while index < tone.count {
+        let end = min(index + 320, tone.count)
+        output.push(Array(tone[index..<end]))
+        Thread.sleep(forTimeInterval: 0.02)
+        index = end
+    }
+    output.flush()
+    Thread.sleep(forTimeInterval: 0.8)
+    output.stop()
+    log("测试音结束")
+    exit(0)
+}
+
+let decoder = ATVVDecoder()
+let source = VoiceLogSource()
+var sessionOpen = false
+var packets = 0
+var samplesTotal = 0
+var lastReport = Date()
+var pendingSync: (Int, Int)?
+
+func handleControl(_ bytes: [UInt8]) {
+    guard let first = bytes.first else { return }
+    switch first {
+    case 0x04:
+        decoder.reset()
+        pendingSync = nil
+        sessionOpen = true
+        log("语音会话开始（ATVV）")
+    case 0x0A:
+        if bytes.count >= 7 {
+            let raw = Int16(bitPattern: UInt16(bytes[4]) << 8 | UInt16(bytes[5]))
+            let step = Int(bytes[6])
+            pendingSync = (Int(raw), step)
+            if sessionOpen {
+                decoder.reset(predictor: Int(raw), stepIndex: step)
+            }
+        }
+    case 0x00:
+        sessionOpen = false
+        output.flush()
+        log("语音会话停止")
+    default:
+        break
+    }
+}
+
+source.onControl = { handleControl($0) }
+source.onAudio = { bytes in
+    guard sessionOpen else { return }
+    packets += 1
+    if let sync = pendingSync {
+        decoder.reset(predictor: sync.0, stepIndex: sync.1)
+        pendingSync = nil
+    }
+    let samples = decoder.feed(bytes)
+    guard !samples.isEmpty else { return }
+    samplesTotal += samples.count
+    output.push(samples)
+}
+source.start()
+log("已启动：监听遥控器语音键 + 麦克风音频，输出到 \(deviceName(device))")
+log("在输入法/会议软件里把麦克风选为 \(deviceName(device))")
+
+if options.duration > 0 {
+    DispatchQueue.main.asyncAfter(deadline: .now() + options.duration) {
+        log("到达运行时长，退出")
+        source.stop()
+        output.stop()
+        exit(0)
+    }
+}
+
+let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+    let rms: Double = 0
+    _ = rms
+    log("状态：会话=\(sessionOpen ? "开" : "关") 音频包=\(packets) 采样=\(samplesTotal)")
+}
+RunLoop.main.run()
+_ = timer

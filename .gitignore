@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+app/dist/
+app/Resources/AppIcon.iconset/
+tools/remote-mic/RemoteMic

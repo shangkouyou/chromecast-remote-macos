@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "device": {
+    "vendor_id": 6353,
+    "product_id": 37968,
+    "product": "Chromecast Remote",
+    "seize": true
+  },
+  "logging": {
+    "reports": false
+  },
+  "mapping": {
+    "c:0x19E": "key:ctrl+cmd+q",
+    "c:0x42": "key:up",
+    "c:0x43": "key:down",
+    "c:0x44": "key:left",
+    "c:0x45": "key:right",
+    "c:0x41": "key:return",
+    "c:0x224": "key:escape",
+    "c:0x223": "key:ctrl+up",
+    "c:0x221": "voice",
+    "c:0xE2": "media:mute",
+    "c:0xE9": "media:volume_up",
+    "c:0xEA": "media:volume_down",
+    "c:0xCD": "media:play_pause",
+    "c:0x77": "url:https://www.youtube.com",
+    "c:0x78": "url:https://www.netflix.com",
+    "c:0x79": "none",
+    "c:0x89": "key:cmd+tab"
+  },
+  "voice": {
+    "button": "assistant",
+    "mode": "hold",
+    "max_session_s": 60,
+    "release_delay_ms": 150,
+    "end_actions": [],
+    "disconnect_bluetooth": false,
+    "bluetooth_address": ""
+  }
+}
