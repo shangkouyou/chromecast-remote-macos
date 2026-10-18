@@ -11,7 +11,7 @@
 | --- | --- |
 | **macOS 13+**（Intel / Apple Silicon） | App 与命令行都依赖 IOKit / CoreGraphics / AVFoundation |
 | **任何 BLE / USB HID 遥控器** | 只要 macOS 在“系统信息 → 蓝牙”或 `hidutil list` 里把它识别为键盘 / Consumer Control，就能映射 |
-| 已实测 | Google Chromecast Voice Remote（`18d1:9450`，BLE，17 键） |
+| **完整实测** | **G9N9N**（Chromecast with Google TV 2020 语音遥控器，`18d1:9450`，17 键 + 语音 + 麦克风） |
 | 未逐一实测 | 小米蓝牙语音遥控器、Apple TV Remote、各类 Android TV / 投影仪遥控器——原理相同，用 `learn` 学键即可 |
 
 | 不能用 | 原因 |
@@ -19,6 +19,24 @@
 | **iPhone / iPad** | iOS 不允许第三方 App 做系统级按键注入；遥控器能配对成键盘，但本软件无法在 iOS 上运行 |
 | Windows / Linux | 本项目使用 macOS 私有/系统 API；Windows 可参考上游 `windows-remote-mic-app`，Linux 可用 `keyd`/`hid-remapper` |
 | 红外-only 遥控器 | 没有蓝牙 HID 连接，系统收不到按键 |
+
+### 1.1 完整支持的具体型号（重要）
+
+<img src="remote-g9n9n.jpg" width="320" alt="G9N9N 遥控器电池仓">
+
+图中是 **Chromecast with Google TV Voice Remote（2020）**，电池仓丝印 **G9N9N**，
+白色圆角、两节 AAA 电池，VID:PID `18d1:9450`。
+
+| 型号 | 完整支持 | 说明 |
+| --- | --- | --- |
+| **G9N9N**（图中） | ✅ | 17 键 + 语音键 Fn + 遥控器麦克风（ATVV），全部实测 |
+| Google TV Streamer 2024 遥控器 | ❓ | 未实测；按键可能可用，语音/麦克风不保证 |
+| ADT-3 / 其它 Chromecast 遥控器 | ❓ | 需 `sniff` / `learn` 验证 |
+| 小米 / 其它品牌遥控器 | 部分 | 按键可学；语音键与麦克风链路不同，不保证 |
+
+市面上谷歌遥控器外观相似但固件/HID 描述符/语音通道不同，**不是所有谷歌遥控器都通用**。
+购买或替换前请对照电池仓丝印 `G9N9N`；不确定时先用 `sniff` 看有没有 HID 报告、用
+`learn` 逐个绑键，语音键则看蓝牙日志里有没有 `0x003F`。
 
 > 本项目与 Google 无关联；Google TV、Chromecast 是 Google LLC 的商标。
 

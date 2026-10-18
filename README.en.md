@@ -6,6 +6,12 @@ to macOS actions, with an **Fn/Globe cloud key** for voice input and an optional
 
 - **Platform:** macOS 13+ (Intel / Apple Silicon). **iOS, Windows and Linux are not supported.**
 - **Remote:** any remote macOS exposes as a HID keyboard / Consumer Control device.
+  **Full support (voice key + microphone) is validated only on the model in the photo:
+  Chromecast with Google TV Voice Remote (2020), G9N9N, VID:PID `18d1:9450`.**
+  Other Google/Chromecast remotes look similar but differ; basic buttons may map, voice and
+  microphone are not guaranteed.
+
+<img src="docs/remote-g9n9n.jpg" width="320" alt="G9N9N remote battery compartment">
 - **Scope note:** the voice key of the Chromecast remote is not a HID report; it is a BLE
   GATT indication (`0x003F`). The app reads it from the Bluetooth log. Subscribing to the
   same GATT characteristic with another tool will hide those log lines — toggle Bluetooth

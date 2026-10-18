@@ -8,12 +8,29 @@ macOS 听写（云键），说完自动结束录音。
 提供两种形态：**原生 macOS App**（推荐，双击即用）和纯 Python 命令行工具；
 不依赖 PyObjC、Karabiner 或任何后台商业软件。
 
-> **支持范围**：macOS 13+（Intel / Apple Silicon）＋ 任何能被 macOS 识别为 HID 键盘 /
-> Consumer Control 的蓝牙遥控器（已实测 Chromecast Voice Remote `18d1:9450`）。
+> **支持范围**：macOS 13+（Intel / Apple Silicon）＋ 能被 macOS 识别为 HID 键盘 /
+> Consumer Control 的蓝牙遥控器；**完整支持仅限图中 G9N9N 这一款**（见下）。
+> 其它 HID 遥控器可以映射按键，但语音键/麦克风需自行验证。
 > **iPhone / iPad 不支持**：iOS 不允许第三方 App 做系统级按键注入，遥控器可配对成键盘，
 > 但本软件无法在 iOS 上运行。详见 [通用手册](docs/USAGE.md)。
 >
 > 本项目与 Google 无关联；Google TV、Chromecast 是 Google LLC 的商标。
+
+### 只完整支持图中这一款（重要）
+
+<img src="docs/remote-g9n9n.jpg" width="320" alt="G9N9N 遥控器电池仓">
+
+图中是 **Chromecast with Google TV Voice Remote（2020）**，电池仓丝印 **G9N9N**，
+白色圆角、两节 AAA 电池，VID:PID `18d1:9450`。
+
+市面上谷歌/Chromecast 遥控器有很多版本（Google TV Streamer 2024 款、ADT-3、不同地区 /
+固件批次、外观相似的第三方遥控器），外观像，但 HID 描述符、语音通道、麦克风协议可能不同：
+
+- 本项目的 **17 键 + 语音键 Fn + 遥控器麦克风** 只在这一款上完整实测通过；
+- 其它型号可能只有部分按键可用，语音键和麦克风**不保证**；
+- 买之前请对照照片（尤其电池仓丝印 `G9N9N`），或先用 `sniff` / `learn` 验证。
+
+**不是所有谷歌遥控器都通用。**
 
 ---
 
