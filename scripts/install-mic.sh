@@ -3,7 +3,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/tools/remote-mic/RemoteMic"
-DEVICE="${GVTV_AUDIO_DEVICE:-BlackHole 2ch}"
+if [ -n "${GVTV_AUDIO_DEVICE:-}" ]; then
+  DEVICE="$GVTV_AUDIO_DEVICE"
+elif [ -d "/Library/Audio/Plug-Ins/HAL/GoogleTV2ch.driver" ]; then
+  DEVICE="Google TV 2ch"
+else
+  DEVICE="BlackHole 2ch"
+fi
 PLIST="$HOME/Library/LaunchAgents/com.gvtv.remote-mic.plist"
 LABEL="com.gvtv.remote-mic"
 UID_NUM="$(id -u)"
