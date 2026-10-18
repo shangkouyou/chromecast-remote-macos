@@ -153,6 +153,7 @@ Report Descriptor 解析 ── 值 1..17 → usage 0x19E/0x42/…/0x89
 ## 4. 快速开始
 
 ```bash
+git clone https://github.com/Scu9277/gvtv-remote.git ~/gvtv-remote
 cd ~/gvtv-remote
 
 ./scripts/install-app.sh     # 推荐：构建并安装原生 App
@@ -439,9 +440,9 @@ tail -f ~/Library/Logs/gvtv-remote.log
   语音状态机、自动结束）。
 * 原生 App 自检（`GoogleTVRemote --selftest`）：描述符 17 用法、下标解码、动作解析、
   配置加载、设备识别全部通过；三个页面均启动无崩溃。
-* 未在本会话验证：媒体键注入的听感（本机显示器无音量控制）。
-* **已由用户实测通过**：语音键 → GATT 事件 → Fn → Chatterfly 语音条 → 文字上屏；
-  遥控器麦克风 → ATVV 解码 → Google TV 2ch → 输入法，整段语音正常转写。
+* 媒体键注入的听感受测试机显示器限制，未做主观验证。
+* **维护者与测试者实测通过**：语音键 → GATT 事件 → Fn → 语音输入法 → 文字上屏；
+  遥控器麦克风 → ATVV 解码 → 虚拟声卡 → 输入法，整段语音正常转写。
 
 ---
 
@@ -452,7 +453,7 @@ gvtv-remote/
 ├── app/                     # 原生 SwiftUI App（推荐）
 │   ├── Sources/             # HID / 映射 / 事件 / 界面 / 自检
 │   ├── Resources/           # Info.plist、图标
-│   ├── build.sh             # 构建 Google TV Remote.app
+│   ├── build.sh             # 构建 Google TV Remote.app（需 Xcode CLT）
 │   └── dist/                # 构建产物
 ├── bin/gvtv-remote          # 命令行入口（无需安装）
 ├── config/mapping.json      # 默认键位
@@ -466,7 +467,8 @@ gvtv-remote/
 │   ├── voice.py             # 语音键状态机（Fn 云键）
 │   ├── config.py            # 配置
 │   └── cli.py               # 命令行
-├── tools/remote-mic/        # 遥控器麦克风 → Google TV 2ch 音频桥
+├── docs/                    # 通用手册 / 截图
+├── tools/remote-mic/        # 遥控器麦克风 → 虚拟声卡音频桥
 ├── scripts/                 # 安装 App / 麦克风桥 / CLI 服务 / 卸载 / 运行 / 体检
 └── tests/                   # 单元测试
 ```

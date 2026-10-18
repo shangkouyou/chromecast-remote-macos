@@ -24,7 +24,13 @@
 
 ---
 
-## 2. 配对与识别设备
+## 2. 前置条件
+
+- macOS 13+；构建 App 需要 Xcode Command Line Tools：`xcode-select --install`
+- Python 3.9+（系统自带 `/usr/bin/python3` 即可，用于命令行/测试）
+- 可选：Homebrew（安装 BlackHole 用；没有也能用脚本下载官方 pkg）
+
+## 3. 配对与识别设备
 
 1. 系统设置 → 蓝牙，把遥控器配对并连接。
 2. 查看它是不是 HID 设备：
@@ -62,7 +68,7 @@ hidutil list | grep -i remote  # 系统视角
 
 ---
 
-## 3. 权限（macOS 必做）
+## 4. 权限（macOS 必做）
 
 | 权限 | 用途 | 给谁 |
 | --- | --- | --- |
@@ -77,7 +83,7 @@ App 方式：系统设置 → 隐私与安全性 → 对应页面勾选 **Google
 
 ---
 
-## 4. 安装与启动
+## 5. 安装与启动
 
 ### 4.1 原生 App（推荐）
 
@@ -98,7 +104,7 @@ App 方式：系统设置 → 隐私与安全性 → 对应页面勾选 **Google
 
 ---
 
-## 5. 按键映射
+## 6. 按键映射
 
 - App：左侧按键列表 → 右侧选择动作类型（键盘 / 媒体 / App / 网址 / Shell / 文本 / 语音）。
 - 命令行学习：
@@ -114,7 +120,7 @@ App 方式：系统设置 → 隐私与安全性 → 对应页面勾选 **Google
 
 ---
 
-## 6. 语音键（Fn / 云键）
+## 7. 语音键（Fn / 云键）
 
 语音键映射为 `voice` 动作：按下发 Fn（Globe），松开释放；系统听写或第三方语音输入法
 （如 Chatterfly）收到 Fn 后开始/结束录音。
@@ -133,7 +139,7 @@ macOS 设置：系统设置 → 键盘 → 听写 / “按下 🌐 键” → �
 
 ---
 
-## 7. 遥控器麦克风（仅部分遥控器）
+## 8. 遥控器麦克风（仅部分遥控器）
 
 Chromecast 遥控器的麦克风走 BLE ATVV（GATT `0x003C`，IMA ADPCM，16 kHz），
 macOS 不会把它暴露成音频输入。需要三步：
@@ -164,7 +170,7 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 
 ---
 
-## 8. 常见问题
+## 9. 常见问题
 
 | 现象 | 处理 |
 | --- | --- |
@@ -184,7 +190,7 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 
 ---
 
-## 9. 卸载
+## 10. 卸载
 
 ```bash
 ./scripts/uninstall.sh                        # 命令行 LaunchAgent
