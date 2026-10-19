@@ -517,6 +517,7 @@ var currentDeviceID = device
 var output = makeOutput(device)
 guard output != nil else { exit(1) }
 fixRouting()
+DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { fixRouting() }
 
 func restartOutput(_ reason: String) {
     guard let id = findDevice(contains: options.deviceName) else { return }
@@ -619,9 +620,11 @@ log("已启动：监听遥控器语音键 + 麦克风音频，输出到 \(device
 let wakeNames = [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification]
 for name in wakeNames {
     NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { _ in
-        log("系统唤醒：检查路由后重启音频桥")
+        log("系统唤醒：检查路由，2 秒后重启音频桥")
         fixRouting()
-        restartBridge("系统唤醒")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            restartBridge("系统唤醒")
+        }
     }
 }
 DistributedNotificationCenter.default().addObserver(
@@ -632,20 +635,6 @@ DistributedNotificationCenter.default().addObserver(
     restartBridge("手动重启")
 }
 
-var outAddr = AudioObjectPropertyAddress(
-    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-    mScope: kAudioObjectPropertyScopeGlobal,
-    mElement: kAudioObjectPropertyElementMain)
-var inAddr = AudioObjectPropertyAddress(
-    mSelector: kAudioHardwarePropertyDefaultInputDevice,
-    mScope: kAudioObjectPropertyScopeGlobal,
-    mElement: kAudioObjectPropertyElementMain)
-AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outAddr, DispatchQueue.main) { _, _ in
-    fixRouting()
-}
-AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &inAddr, DispatchQueue.main) { _, _ in
-    fixRouting()
-}
 
 
 // 设备 ID 会随 coreaudiod 重启变化；引擎也可能因默认设备切换而停止。
