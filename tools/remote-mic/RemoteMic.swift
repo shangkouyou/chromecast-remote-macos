@@ -188,9 +188,7 @@ final class VirtualMicOutput {
         self.deviceID = device
         log("audio: attach")
         engine.attach(player)
-        log("audio: connect")
-        engine.connect(player, to: engine.mainMixerNode, format: format)
-        log("audio: outputNode")
+        log("audio: set device (before connect)")
         let unit = engine.outputNode.audioUnit
         log("audio: unit=\(unit != nil)")
         var dev = device
@@ -204,6 +202,9 @@ final class VirtualMicOutput {
             throw NSError(domain: "RemoteMic", code: Int(status),
                           userInfo: [NSLocalizedDescriptionKey: "无法把音频输出切到虚拟设备（\(status)）"])
         }
+        engine.prepare()
+        log("audio: connect")
+        engine.connect(player, to: engine.mainMixerNode, format: format)
         engine.prepare()
         log("audio: prepared")
         try engine.start()
@@ -421,6 +422,17 @@ func log(_ message: String) {
     }
 }
 
+func serviceRestartCount() -> UInt32 {
+    var a = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyServiceRestarted,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var v: UInt32 = 0
+    var sz = UInt32(MemoryLayout<UInt32>.size)
+    AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &sz, &v)
+    return v
+}
+
 func fixRouting() {
     guard options.fixRouting else { return }
     let out = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
@@ -460,8 +472,8 @@ var lastHeartbeat = Date()
 // 这里主动退出，让 launchd 重新拉起一个干净进程。
 DispatchQueue.global().async {
     while true {
-        Thread.sleep(forTimeInterval: 10)
-        if Date().timeIntervalSince(lastHeartbeat) > 25 {
+        Thread.sleep(forTimeInterval: 5)
+        if Date().timeIntervalSince(lastHeartbeat) > 12 {
             log("心跳超时（主线程卡住），退出以便重启")
             exit(1)
         }
@@ -496,7 +508,7 @@ cleaner.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
 cleaner.arguments = ["-f", "log stream.*0x003C"]
 try? cleaner.run()
 cleaner.waitUntilExit()
-Thread.sleep(forTimeInterval: 0.6)
+Thread.sleep(forTimeInterval: 1.5)
 
 guard let device = findDevice(contains: options.deviceName) else {
     log("找不到虚拟音频设备（名称包含 \(options.deviceName)）。用 --list 查看。")
@@ -518,6 +530,7 @@ var output = makeOutput(device)
 guard output != nil else { exit(1) }
 fixRouting()
 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { fixRouting() }
+var lastServiceRestart = serviceRestartCount()
 
 func restartOutput(_ reason: String) {
     guard let id = findDevice(contains: options.deviceName) else { return }
@@ -640,7 +653,9 @@ DistributedNotificationCenter.default().addObserver(
 // 设备 ID 会随 coreaudiod 重启变化；引擎也可能因默认设备切换而停止。
 // 每 2 秒自检一次，必要时重建音频输出，避免“解码正常但虚拟麦克风没声音”。
 Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-    if let id = findDevice(contains: options.deviceName), id != currentDeviceID {
+    if serviceRestartCount() != lastServiceRestart {
+        restartBridge("coreaudiod 重启")
+    } else if let id = findDevice(contains: options.deviceName), id != currentDeviceID {
         restartBridge("设备 ID 变化")
     } else if output?.isRunning != true {
         restartBridge("音频引擎停止")
