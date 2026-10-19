@@ -199,8 +199,17 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 > 系统默认输入是全局的：开视频会议/语音通话时，记得把输入切回 Mac 麦克风，否则对方
 > 会听到虚拟麦克风（没有声音）。
 
-音频桥每 2 秒自检一次：coreaudiod 重启、默认设备切换导致设备 ID 变化时，会自动重建
-音频输出；日志里出现“音频输出重启”说明已恢复。若仍无声：
+音频桥的守护方式（v1.0.2 起）：
+
+- 每 2 秒自检；设备 ID 变化或音频引擎停止时，**进程退出并由 LaunchAgent 重启**，
+  用全新的 CoreAudio 连接，避免休眠后旧连接“假活”但没声音；
+- 系统唤醒（sleep/wake）时主动重启，并重新检查路由；
+- 单实例锁：LaunchAgent 与手动运行不会叠加抢设备；
+- 心跳看门狗：主线程卡在 CoreAudio 调用超过 25 秒会退出重启；
+- 路由监听：默认输出被改成虚拟声卡、或默认输入被改回 Mac 麦克风时，自动纠正为
+  “输出真实设备、输入虚拟麦克风”。
+
+若仍无声：
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.gvtv.remote-mic
@@ -220,7 +229,8 @@ tail -20 ~/Library/Logs/RemoteMic.log
 | 有按键但系统没动作 | 辅助功能权限；动作是否 `none`；是否与其它改键软件冲突 |
 | 语音键突然失灵 | 蓝牙关/开（清 GATT 订阅会话）；确认没有其它 GATT 客户端 |
 | 语音能转文字但电脑没声音 | 系统输出被设成了虚拟声卡；改回真实扬声器/耳机 |
-| 虚拟麦克风没声音 | `launchctl kickstart -k gui/$(id -u)/com.gvtv.remote-mic`；看日志“音频输出重启” |
+| 虚拟麦克风没声音 | `launchctl kickstart -k gui/$(id -u)/com.gvtv.remote-mic`；看日志是否重新“已启动” |
+| 休眠/唤醒后语音失效 | v1.0.2 已自动重启桥并修正路由；若仍失效，`launchctl kickstart -k …` 并附日志 |
 | 音量/静音无效 | 先 `test-media volume_up`；仍无效改用 `shell:osascript …` |
 | 重新构建 App 后权限失效 | ad-hoc 签名导致，重新勾选一次；固定放在 /Applications |
 | 多个遥控器 | 改配置 `device` 后重启；一次只接管一个 |

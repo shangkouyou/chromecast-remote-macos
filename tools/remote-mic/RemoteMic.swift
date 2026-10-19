@@ -1,4 +1,6 @@
+import AppKit
 import AVFoundation
+import Darwin
 import CoreAudio
 import Foundation
 
@@ -265,10 +267,13 @@ final class VoiceLogSource {
     var onAudio: (([UInt8]) -> Void)?
     private var process: Process?
     private var buffer = ""
+    private var shouldRun = false
     private let pattern = try! NSRegularExpression(
         pattern: #"0x(003C|003F) Characteristic Value \[\s*([0-9A-Fa-f ]+?)\s*\]"#)
 
     func start() {
+        shouldRun = true
+        guard process == nil else { return }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/log")
         task.arguments = [
@@ -283,13 +288,28 @@ final class VoiceLogSource {
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             self?.feed(text)
         }
+        task.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self, self.shouldRun else { return }
+                self.process = nil
+                self.start()
+            }
+        }
         try? task.run()
         process = task
     }
 
+    func restart() {
+        stop()
+        start()
+    }
+
     func stop() {
+        shouldRun = false
+        process?.terminationHandler = nil
         process?.terminate()
         process = nil
+        buffer = ""
     }
 
     private func feed(_ text: String) {
@@ -319,11 +339,45 @@ final class VoiceLogSource {
     }
 }
 
+// MARK: - Routing helpers
+
+func deviceUID(_ id: AudioDeviceID) -> String {
+    var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var s: CFString = "" as CFString; var sz = UInt32(MemoryLayout<CFString>.size)
+    AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &s); return s as String
+}
+
+func deviceID(uid: String) -> AudioDeviceID? {
+    for id in allDevices() where deviceUID(id) == uid { return id }
+    return nil
+}
+
+func defaultDevice(_ sel: AudioObjectPropertySelector) -> AudioDeviceID {
+    var a = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var d = AudioDeviceID(0); var sz = UInt32(MemoryLayout<AudioDeviceID>.size)
+    AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &sz, &d); return d
+}
+
+@discardableResult
+func setDefaultDevice(_ sel: AudioObjectPropertySelector, _ id: AudioDeviceID) -> OSStatus {
+    var a = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var d = id
+    return AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &d)
+}
+
+func isVirtualName(_ name: String) -> Bool {
+    name.contains("Google TV") || name.contains("BlackHole") || name.contains("MiRemoteV")
+}
+
+let lastOutputURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/gvtv-remote/last-output-uid.txt")
+
 // MARK: - Main
 
 struct Options {
     var list = false
     var tone = false
+    var fixRouting = false
     var duration: Double = 0
     var deviceName = "BlackHole 2ch"
 }
@@ -336,6 +390,7 @@ func parseOptions() -> Options {
         switch args[index] {
         case "--list": options.list = true
         case "--tone": options.tone = true
+        case "--fix-routing": options.fixRouting = true
         case "--duration": index += 1; options.duration = Double(args[index]) ?? 0
         case "--device": index += 1; options.deviceName = args[index]
         default: break
@@ -366,6 +421,53 @@ func log(_ message: String) {
     }
 }
 
+func fixRouting() {
+    guard options.fixRouting else { return }
+    let out = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
+    let outName = deviceName(out)
+    if isVirtualName(outName) {
+        var restored = false
+        if let saved = try? String(contentsOf: lastOutputURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           let id = deviceID(uid: saved), !isVirtualName(deviceName(id)) {
+            setDefaultDevice(kAudioHardwarePropertyDefaultOutputDevice, id)
+            setDefaultDevice(kAudioHardwarePropertyDefaultSystemOutputDevice, id)
+            log("路由修复：输出从虚拟设备切回 \(deviceName(id))")
+            restored = true
+        }
+        if !restored,
+           let real = allDevices().first(where: { channelCount($0, scope: kAudioObjectPropertyScopeOutput) > 0 && !isVirtualName(deviceName($0)) }) {
+            setDefaultDevice(kAudioHardwarePropertyDefaultOutputDevice, real)
+            setDefaultDevice(kAudioHardwarePropertyDefaultSystemOutputDevice, real)
+            log("路由修复：输出切到 \(deviceName(real))")
+        }
+    } else {
+        let uid = deviceUID(out)
+        try? FileManager.default.createDirectory(at: lastOutputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? uid.write(to: lastOutputURL, atomically: true, encoding: .utf8)
+    }
+    if let gtv = findDevice(contains: options.deviceName) {
+        if defaultDevice(kAudioHardwarePropertyDefaultInputDevice) != gtv {
+            setDefaultDevice(kAudioHardwarePropertyDefaultInputDevice, gtv)
+            log("路由修复：输入切到 \(deviceName(gtv))")
+        }
+    }
+}
+
+var lastHeartbeat = Date()
+
+// 独立心跳：主线程卡在 CoreAudio 调用里时，LaunchAgent 的 KeepAlive 不会生效，
+// 这里主动退出，让 launchd 重新拉起一个干净进程。
+DispatchQueue.global().async {
+    while true {
+        Thread.sleep(forTimeInterval: 10)
+        if Date().timeIntervalSince(lastHeartbeat) > 25 {
+            log("心跳超时（主线程卡住），退出以便重启")
+            exit(1)
+        }
+    }
+}
+
 let options = parseOptions()
 if options.list {
     for id in allDevices() {
@@ -377,6 +479,24 @@ if options.list {
     }
     exit(0)
 }
+
+// 单实例锁必须在任何 CoreAudio 设备访问之前获取，避免第二个实例卡在设备初始化。
+let supportDir = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/gvtv-remote", isDirectory: true)
+try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+let lockPath = supportDir.appendingPathComponent("remote-mic.lock").path
+let lockFD = open(lockPath, O_CREAT | O_RDWR, 0o644)
+if lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
+    log("已有另一个麦克风桥在运行，本实例退出")
+    exit(0)
+}
+// 清理上一次异常退出留下的 log stream 子进程（避免重复处理日志）。
+let cleaner = Process()
+cleaner.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+cleaner.arguments = ["-f", "log stream.*0x003C"]
+try? cleaner.run()
+cleaner.waitUntilExit()
+Thread.sleep(forTimeInterval: 0.6)
 
 guard let device = findDevice(contains: options.deviceName) else {
     log("找不到虚拟音频设备（名称包含 \(options.deviceName)）。用 --list 查看。")
@@ -396,6 +516,7 @@ func makeOutput(_ id: AudioDeviceID) -> VirtualMicOutput? {
 var currentDeviceID = device
 var output = makeOutput(device)
 guard output != nil else { exit(1) }
+fixRouting()
 
 func restartOutput(_ reason: String) {
     guard let id = findDevice(contains: options.deviceName) else { return }
@@ -475,16 +596,65 @@ source.onAudio = { bytes in
     samplesTotal += samples.count
     output?.push(samples)
 }
+func restartBridge(_ reason: String) -> Never {
+    log("重启音频桥（\(reason)）：退出后由 LaunchAgent 拉起")
+    output?.stop()
+    source.stop()
+    exit(0)
+}
+
+signal(SIGTERM, SIG_IGN)
+let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+sigTerm.setEventHandler {
+    log("收到 SIGTERM，停止音频/日志源")
+    output?.stop()
+    source.stop()
+    exit(0)
+}
+sigTerm.resume()
+
 source.start()
 log("已启动：监听遥控器语音键 + 麦克风音频，输出到 \(deviceName(device))")
+
+let wakeNames = [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification]
+for name in wakeNames {
+    NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { _ in
+        log("系统唤醒：检查路由后重启音频桥")
+        fixRouting()
+        restartBridge("系统唤醒")
+    }
+}
+DistributedNotificationCenter.default().addObserver(
+    forName: Notification.Name("com.gvtv.remote-mic.restart"), object: nil, queue: .main
+) { _ in
+    log("收到重启通知：检查路由后重启音频桥")
+    fixRouting()
+    restartBridge("手动重启")
+}
+
+var outAddr = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain)
+var inAddr = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwarePropertyDefaultInputDevice,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain)
+AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outAddr, DispatchQueue.main) { _, _ in
+    fixRouting()
+}
+AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &inAddr, DispatchQueue.main) { _, _ in
+    fixRouting()
+}
+
 
 // 设备 ID 会随 coreaudiod 重启变化；引擎也可能因默认设备切换而停止。
 // 每 2 秒自检一次，必要时重建音频输出，避免“解码正常但虚拟麦克风没声音”。
 Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
     if let id = findDevice(contains: options.deviceName), id != currentDeviceID {
-        restartOutput("设备 ID 变化")
+        restartBridge("设备 ID 变化")
     } else if output?.isRunning != true {
-        restartOutput("音频引擎停止")
+        restartBridge("音频引擎停止")
     }
 }
 log("在输入法/会议软件里把麦克风选为 \(deviceName(device))")
@@ -501,6 +671,7 @@ if options.duration > 0 {
 let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
     let rms: Double = 0
     _ = rms
+    lastHeartbeat = Date()
     log("状态：会话=\(sessionOpen ? "开" : "关") 音频包=\(packets) 采样=\(samplesTotal)")
 }
 RunLoop.main.run()

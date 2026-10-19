@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/tools/remote-mic/RemoteMic"
+DEST="$HOME/Library/Application Support/gvtv-remote/RemoteMic"
 if [ -n "${GVTV_AUDIO_DEVICE:-}" ]; then
   DEVICE="$GVTV_AUDIO_DEVICE"
 elif [ -d "/Library/Audio/Plug-Ins/HAL/GoogleTV2ch.driver" ]; then
@@ -15,7 +16,9 @@ LABEL="com.gvtv.remote-mic"
 UID_NUM="$(id -u)"
 
 [ -x "$BIN" ] || "$ROOT/tools/remote-mic/build.sh"
-mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" "$(dirname "$DEST")"
+cp "$BIN" "$DEST"
+chmod +x "$DEST"
 
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -25,9 +28,10 @@ cat > "$PLIST" <<PLIST_EOF
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${BIN}</string>
+    <string>${DEST}</string>
     <string>--device</string>
     <string>${DEVICE}</string>
+    <string>--fix-routing</string>
   </array>
   <key>WorkingDirectory</key><string>${ROOT}/tools/remote-mic</string>
   <key>RunAtLoad</key><true/>
