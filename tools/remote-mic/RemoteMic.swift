@@ -178,6 +178,16 @@ final class VirtualMicOutput {
     private(set) var totalSamples = 0
     var isRunning: Bool { engine.isRunning }
 
+    @discardableResult
+    func repinDevice() -> OSStatus {
+        var dev = deviceID
+        return AudioUnitSetProperty(
+            engine.outputNode.audioUnit!,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0,
+            &dev, UInt32(MemoryLayout<AudioDeviceID>.size))
+    }
+
     init(device: AudioDeviceID) throws {
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                          sampleRate: 16000, channels: 1,
@@ -433,8 +443,14 @@ func serviceRestartCount() -> UInt32 {
     return v
 }
 
+var suppressOutputListener = false
+var lastRoutingFixAt = Date.distantPast
+
 func fixRouting() {
     guard options.fixRouting else { return }
+    lastRoutingFixAt = Date()
+    suppressOutputListener = true
+    defer { suppressOutputListener = false }
     let out = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
     let outName = deviceName(out)
     if isVirtualName(outName) {
@@ -526,19 +542,10 @@ func makeOutput(_ id: AudioDeviceID) -> VirtualMicOutput? {
 }
 
 var currentDeviceID = device
-var output = makeOutput(device)
-guard output != nil else { exit(1) }
+// 参考“无线麦”的按需管道：不再常驻占用虚拟设备，每次按住语音键才创建输出。
+var output: VirtualMicOutput? = nil
 fixRouting()
 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { fixRouting() }
-var lastServiceRestart = serviceRestartCount()
-
-func restartOutput(_ reason: String) {
-    guard let id = findDevice(contains: options.deviceName) else { return }
-    output?.stop()
-    output = makeOutput(id)
-    currentDeviceID = id
-    log("音频输出重启（\(reason)）→ \(deviceName(id))")
-}
 
 if options.tone {
     let seconds = options.duration > 0 ? options.duration : 1.5
@@ -547,18 +554,19 @@ if options.tone {
     for i in 0..<count {
         tone[i] = Int16(6000 * sin(2 * Double.pi * 440 * Double(i) / 16000))
     }
+    guard let out = makeOutput(device) else { exit(1) }
     log("播放 \(seconds) 秒 440Hz 测试音到 \(deviceName(device))，同时请用输入设备监听…")
     // 直接按 20ms 一块送入
     var index = 0
     while index < tone.count {
         let end = min(index + 320, tone.count)
-        output?.push(Array(tone[index..<end]))
+        out.push(Array(tone[index..<end]))
         Thread.sleep(forTimeInterval: 0.02)
         index = end
     }
-    output?.flush()
+    out.flush()
     Thread.sleep(forTimeInterval: 0.8)
-    output?.stop()
+    out.stop()
     log("测试音结束")
     exit(0)
 }
@@ -575,10 +583,22 @@ func handleControl(_ bytes: [UInt8]) {
     guard let first = bytes.first else { return }
     switch first {
     case 0x04:
+        output?.stop()
+        output = nil
+        if let id = findDevice(contains: options.deviceName) {
+            output = makeOutput(id)
+            currentDeviceID = id
+        }
+        if options.fixRouting,
+           let gtv = findDevice(contains: options.deviceName),
+           defaultDevice(kAudioHardwarePropertyDefaultInputDevice) != gtv {
+            setDefaultDevice(kAudioHardwarePropertyDefaultInputDevice, gtv)
+            log("语音开始前输入切回 \(deviceName(gtv))")
+        }
         decoder.reset()
         pendingSync = nil
         sessionOpen = true
-        log("语音会话开始（ATVV）")
+        log("语音会话开始（ATVV），已打开按需虚拟管道")
     case 0x0A:
         if bytes.count >= 7 {
             let raw = Int16(bitPattern: UInt16(bytes[4]) << 8 | UInt16(bytes[5]))
@@ -591,7 +611,9 @@ func handleControl(_ bytes: [UInt8]) {
     case 0x00:
         sessionOpen = false
         output?.flush()
-        log("语音会话停止")
+        output?.stop()
+        output = nil
+        log("语音会话停止，关闭按需虚拟管道")
     default:
         break
     }
@@ -633,11 +655,9 @@ log("已启动：监听遥控器语音键 + 麦克风音频，输出到 \(device
 let wakeNames = [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification]
 for name in wakeNames {
     NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { _ in
-        log("系统唤醒：检查路由，2 秒后重启音频桥")
+        log("系统唤醒：重启日志源并检查路由")
+        source.restart()
         fixRouting()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            restartBridge("系统唤醒")
-        }
     }
 }
 DistributedNotificationCenter.default().addObserver(
@@ -648,19 +668,20 @@ DistributedNotificationCenter.default().addObserver(
     restartBridge("手动重启")
 }
 
+let appStart = Date()
+NotificationCenter.default.addObserver(
+    forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
+) { _ in
+    if Date().timeIntervalSince(appStart) > 3.0 {
+        let st = output?.repinDevice() ?? -1
+        log("音频配置变化，虚拟管道重新绑定 status=\(st)")
+    }
+}
+
 
 
 // 设备 ID 会随 coreaudiod 重启变化；引擎也可能因默认设备切换而停止。
 // 每 2 秒自检一次，必要时重建音频输出，避免“解码正常但虚拟麦克风没声音”。
-Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-    if serviceRestartCount() != lastServiceRestart {
-        restartBridge("coreaudiod 重启")
-    } else if let id = findDevice(contains: options.deviceName), id != currentDeviceID {
-        restartBridge("设备 ID 变化")
-    } else if output?.isRunning != true {
-        restartBridge("音频引擎停止")
-    }
-}
 log("在输入法/会议软件里把麦克风选为 \(deviceName(device))")
 
 if options.duration > 0 {

@@ -357,8 +357,8 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 
 然后在输入法/语音软件的「麦克风」里选择 **BlackHole 2ch**（或 **Google TV 2ch**），
 系统「输出」保持真实扬声器/耳机（**不要**选虚拟声卡，它是一条回环线，会把声音吞掉），
-**按住**遥控器语音键说话、松开结束。音频桥在休眠/唤醒、coreaudiod 重启后会自动重启并
-修正路由（输出保持真实设备，输入保持虚拟麦克风）。日志：`~/Library/Logs/RemoteMic.log`。
+**按住**遥控器语音键说话、松开结束。音频桥采用**按需虚拟管道**：只在按住语音键时打开到虚拟声卡的输出，
+松开即关闭；切换系统输出/蓝牙耳机不会影响语音。日志：`~/Library/Logs/RemoteMic.log`。
 
 > **关键限制**：这套语音键检测依赖 bluetoothd 把未被订阅的 GATT indication 写进系统日志。
 > 一旦有 CoreBluetooth 客户端订阅了遥控器的 ATVV 特征，日志就不再出现，语音键会“失灵”
