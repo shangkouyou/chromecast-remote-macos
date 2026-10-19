@@ -356,6 +356,7 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 ```
 
 然后在输入法/语音软件的「麦克风」里选择 **BlackHole 2ch**（或 **Google TV 2ch**），
+系统「输出」保持真实扬声器/耳机（**不要**选虚拟声卡，它是一条回环线，会把声音吞掉），
 **按住**遥控器语音键说话、松开结束。日志：`~/Library/Logs/RemoteMic.log`。
 
 > **关键限制**：这套语音键检测依赖 bluetoothd 把未被订阅的 GATT indication 写进系统日志。

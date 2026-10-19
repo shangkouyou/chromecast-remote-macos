@@ -183,6 +183,30 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 把语音输入法的麦克风选为 **BlackHole 2ch** 或 **Google TV 2ch**，按住遥控器语音键
 说话即可。音频桥日志：`~/Library/Logs/RemoteMic.log`。
 
+### 7.4 音频路由（很重要，别把虚拟声卡当扬声器）
+
+虚拟声卡是一条“回环线”，不是扬声器。正确设置：
+
+| 位置 | 应该选 |
+| --- | --- |
+| 系统设置 → 声音 → **输出** | 真实扬声器 / 耳机（L32p-30、MacBook Pro 扬声器、蓝牙耳机） |
+| 系统设置 → 声音 → **输入** | **Google TV 2ch**（或 BlackHole 2ch） |
+| 输入法自己的麦克风 | **Google TV 2ch**（或“系统默认”） |
+
+把虚拟设备设为**输出**会把系统声音全部送进这条回环线，听起来就是“没声音/耳机坏了”，
+这是设计如此，不是硬件故障。输出保持真实设备即可。
+
+> 系统默认输入是全局的：开视频会议/语音通话时，记得把输入切回 Mac 麦克风，否则对方
+> 会听到虚拟麦克风（没有声音）。
+
+音频桥每 2 秒自检一次：coreaudiod 重启、默认设备切换导致设备 ID 变化时，会自动重建
+音频输出；日志里出现“音频输出重启”说明已恢复。若仍无声：
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.gvtv.remote-mic
+tail -20 ~/Library/Logs/RemoteMic.log
+```
+
 > 音频桥只针对 ATVV 遥控器（Chromecast / 部分 Android TV 遥控器）。小米等其它型号的
 > 麦克风链路不同，需单独适配。没有麦克风需求时完全可以不装 BlackHole。
 
@@ -195,6 +219,8 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 | 终端/日志没有按键 | 输入监控权限；`sniff` 确认；换 USB 口/重连 |
 | 有按键但系统没动作 | 辅助功能权限；动作是否 `none`；是否与其它改键软件冲突 |
 | 语音键突然失灵 | 蓝牙关/开（清 GATT 订阅会话）；确认没有其它 GATT 客户端 |
+| 语音能转文字但电脑没声音 | 系统输出被设成了虚拟声卡；改回真实扬声器/耳机 |
+| 虚拟麦克风没声音 | `launchctl kickstart -k gui/$(id -u)/com.gvtv.remote-mic`；看日志“音频输出重启” |
 | 音量/静音无效 | 先 `test-media volume_up`；仍无效改用 `shell:osascript …` |
 | 重新构建 App 后权限失效 | ad-hoc 签名导致，重新勾选一次；固定放在 /Applications |
 | 多个遥控器 | 改配置 `device` 后重启；一次只接管一个 |

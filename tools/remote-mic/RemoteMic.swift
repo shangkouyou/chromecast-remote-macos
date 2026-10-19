@@ -174,6 +174,7 @@ final class VirtualMicOutput {
     private let prebufferFrames = 4800  // 300 ms @ 16 kHz
     private(set) var deviceID: AudioDeviceID = 0
     private(set) var totalSamples = 0
+    var isRunning: Bool { engine.isRunning }
 
     init(device: AudioDeviceID) throws {
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -383,12 +384,25 @@ guard let device = findDevice(contains: options.deviceName) else {
 }
 log("虚拟设备：\(deviceName(device)) (id \(device))")
 
-let output: VirtualMicOutput
-do {
-    output = try VirtualMicOutput(device: device)
-} catch {
-    log("音频输出启动失败：\(error.localizedDescription)")
-    exit(1)
+func makeOutput(_ id: AudioDeviceID) -> VirtualMicOutput? {
+    do {
+        return try VirtualMicOutput(device: id)
+    } catch {
+        log("音频输出启动失败：\(error.localizedDescription)")
+        return nil
+    }
+}
+
+var currentDeviceID = device
+var output = makeOutput(device)
+guard output != nil else { exit(1) }
+
+func restartOutput(_ reason: String) {
+    guard let id = findDevice(contains: options.deviceName) else { return }
+    output?.stop()
+    output = makeOutput(id)
+    currentDeviceID = id
+    log("音频输出重启（\(reason)）→ \(deviceName(id))")
 }
 
 if options.tone {
@@ -403,13 +417,13 @@ if options.tone {
     var index = 0
     while index < tone.count {
         let end = min(index + 320, tone.count)
-        output.push(Array(tone[index..<end]))
+        output?.push(Array(tone[index..<end]))
         Thread.sleep(forTimeInterval: 0.02)
         index = end
     }
-    output.flush()
+    output?.flush()
     Thread.sleep(forTimeInterval: 0.8)
-    output.stop()
+    output?.stop()
     log("测试音结束")
     exit(0)
 }
@@ -441,7 +455,7 @@ func handleControl(_ bytes: [UInt8]) {
         }
     case 0x00:
         sessionOpen = false
-        output.flush()
+        output?.flush()
         log("语音会话停止")
     default:
         break
@@ -459,17 +473,27 @@ source.onAudio = { bytes in
     let samples = decoder.feed(bytes)
     guard !samples.isEmpty else { return }
     samplesTotal += samples.count
-    output.push(samples)
+    output?.push(samples)
 }
 source.start()
 log("已启动：监听遥控器语音键 + 麦克风音频，输出到 \(deviceName(device))")
+
+// 设备 ID 会随 coreaudiod 重启变化；引擎也可能因默认设备切换而停止。
+// 每 2 秒自检一次，必要时重建音频输出，避免“解码正常但虚拟麦克风没声音”。
+Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+    if let id = findDevice(contains: options.deviceName), id != currentDeviceID {
+        restartOutput("设备 ID 变化")
+    } else if output?.isRunning != true {
+        restartOutput("音频引擎停止")
+    }
+}
 log("在输入法/会议软件里把麦克风选为 \(deviceName(device))")
 
 if options.duration > 0 {
     DispatchQueue.main.asyncAfter(deadline: .now() + options.duration) {
         log("到达运行时长，退出")
         source.stop()
-        output.stop()
+        output?.stop()
         exit(0)
     }
 }
