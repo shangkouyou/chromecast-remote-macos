@@ -210,6 +210,26 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 - 休眠/唤醒后只需重启日志源和检查路由，不再重建常驻音频引擎；
 - 单实例锁避免 LaunchAgent 与手动运行叠加抢设备。
 
+### 7.6 麦克风增益（v1.2.0）
+
+遥控器麦克风偏小，解码后默认加 **+10 dB**（与无线麦一致）。处理链：
+
+```text
+20 Hz 一阶高通（去 ADPCM 直流偏置）
+  → [1,2,1]/4 三点平滑
+  → dB 增益（默认 +10，可 -24..+24）
+  → int16 削波
+```
+
+调整方式（下一次按住语音键生效，无需重启桥）：
+
+- 打开 `~/Applications/MicGain.app`（源码在 `tools/mic-gain/`），拖滑块或点 `+14` / `+18`；
+- 或命令行：`./scripts/set-gain.sh 13`；
+- 配置文件：`~/Library/Application Support/gvtv-remote/mic-config.json`。
+
+建议 **6–14 dB**。过高会放大底噪并削波（虚拟麦克风峰值接近 1.0 时识别反而变差）；
+如果 +10 还不够，先试 +13 / +14，不建议长期 +20 以上。
+
 若仍无声：
 
 ```bash

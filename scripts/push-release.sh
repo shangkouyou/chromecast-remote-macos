@@ -1,9 +1,9 @@
 #!/bin/bash
 # GitHub 解封后执行：推送 main + tag，并创建 Release。
-# 用法：./scripts/push-release.sh [tag]   默认 v1.1.0
+# 用法：./scripts/push-release.sh [tag]   默认 v1.2.0
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${1:-v1.1.0}"
+VERSION="${1:-v1.2.0}"
 GH_BIN="${GH_BIN:-gh}"
 
 if ! command -v "$GH_BIN" >/dev/null 2>&1; then
@@ -15,5 +15,5 @@ fi
 git push origin main
 git push origin "$VERSION"
 "$GH_BIN" release create "$VERSION" \
-    --title "v${VERSION#v} — 按需虚拟管道" \
+    --title "v${VERSION#v} — 麦克风增益" \
     --notes-file "docs/releases/${VERSION#v}.md"

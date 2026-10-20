@@ -1,9 +1,9 @@
 #!/bin/bash
 # 打本地发布包：源码 tar.gz + 含 .git 的仓库备份 + SHA256。
-# 用法：./scripts/package.sh [tag]   默认 v1.1.0
+# 用法：./scripts/package.sh [tag]   默认 v1.2.0
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${1:-v1.1.0}"
+VERSION="${1:-v1.2.0}"
 VERSION_NUM="${VERSION#v}"
 DIST="dist"
 mkdir -p "$DIST"

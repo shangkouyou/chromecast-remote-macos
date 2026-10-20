@@ -383,12 +383,84 @@ func isVirtualName(_ name: String) -> Bool {
 let lastOutputURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/gvtv-remote/last-output-uid.txt")
 
+// MARK: - Mic gain / postprocess (对齐无线麦)
+
+struct MicSettings {
+    var gainDB: Double = 10.0
+}
+
+let micConfigURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/gvtv-remote/mic-config.json")
+
+func loadMicSettings() -> MicSettings {
+    guard let data = try? Data(contentsOf: micConfigURL),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let number = object["gain_db"] as? NSNumber else {
+        return MicSettings()
+    }
+    return MicSettings(gainDB: min(24.0, max(-24.0, number.doubleValue)))
+}
+
+/// 20 Hz 一阶高通去 DC 偏置 + [1,2,1]/4 三点平滑 + dB 增益 + int16 削波。
+/// 参数与无线麦的 DCHighPassFilter / postprocess 一致（默认 +10 dB）。
+final class PCMPostprocessor {
+    private let alpha: Double
+    private var previousInput = 0.0
+    private var previousOutput = 0.0
+    private var initialized = false
+    var gainDB: Double
+
+    init(sampleRate: Double = 16000, cutoffHz: Double = 20, gainDB: Double = 10) {
+        self.alpha = exp(-2.0 * Double.pi * cutoffHz / sampleRate)
+        self.gainDB = min(24.0, max(-24.0, gainDB))
+    }
+
+    func reset() {
+        previousInput = 0
+        previousOutput = 0
+        initialized = false
+    }
+
+    func process(_ samples: [Int16]) -> [Int16] {
+        guard !samples.isEmpty else { return [] }
+        if !initialized {
+            previousInput = Double(samples[0])
+            initialized = true
+        }
+
+        var centered = [Int](repeating: 0, count: samples.count)
+        for i in 0..<samples.count {
+            let current = Double(samples[i])
+            let output = current - previousInput + alpha * previousOutput
+            previousInput = current
+            previousOutput = output
+            centered[i] = min(32767, max(-32768, Int(output.rounded())))
+        }
+
+        var smoothed = centered
+        if centered.count >= 3 {
+            for i in 1..<(centered.count - 1) {
+                smoothed[i] = (centered[i - 1] + 2 * centered[i] + centered[i + 1]) >> 2
+            }
+        }
+
+        let gain = pow(10.0, min(24.0, max(-24.0, gainDB)) / 20.0)
+        var result = [Int16](repeating: 0, count: smoothed.count)
+        for i in 0..<smoothed.count {
+            let scaled = Int((Double(smoothed[i]) * gain).rounded())
+            result[i] = Int16(min(32767, max(-32768, scaled)))
+        }
+        return result
+    }
+}
+
 // MARK: - Main
 
 struct Options {
     var list = false
     var tone = false
     var fixRouting = false
+    var gainDB: Double? = nil
     var duration: Double = 0
     var deviceName = "BlackHole 2ch"
 }
@@ -402,6 +474,7 @@ func parseOptions() -> Options {
         case "--list": options.list = true
         case "--tone": options.tone = true
         case "--fix-routing": options.fixRouting = true
+        case "--gain-db": index += 1; options.gainDB = Double(args[index])
         case "--duration": index += 1; options.duration = Double(args[index]) ?? 0
         case "--device": index += 1; options.deviceName = args[index]
         default: break
@@ -572,6 +645,9 @@ if options.tone {
 }
 
 let decoder = ATVVDecoder()
+var micSettings = loadMicSettings()
+if let override = options.gainDB { micSettings.gainDB = min(24.0, max(-24.0, override)) }
+let pcm = PCMPostprocessor(gainDB: micSettings.gainDB)
 let source = VoiceLogSource()
 var sessionOpen = false
 var packets = 0
@@ -595,10 +671,14 @@ func handleControl(_ bytes: [UInt8]) {
             setDefaultDevice(kAudioHardwarePropertyDefaultInputDevice, gtv)
             log("语音开始前输入切回 \(deviceName(gtv))")
         }
+        micSettings = loadMicSettings()
+        if let override = options.gainDB { micSettings.gainDB = min(24.0, max(-24.0, override)) }
+        pcm.gainDB = micSettings.gainDB
+        pcm.reset()
         decoder.reset()
         pendingSync = nil
         sessionOpen = true
-        log("语音会话开始（ATVV），已打开按需虚拟管道")
+        log(String(format: "语音会话开始（ATVV），已打开按需虚拟管道，增益 %+.1f dB", micSettings.gainDB))
     case 0x0A:
         if bytes.count >= 7 {
             let raw = Int16(bitPattern: UInt16(bytes[4]) << 8 | UInt16(bytes[5]))
@@ -627,8 +707,9 @@ source.onAudio = { bytes in
         decoder.reset(predictor: sync.0, stepIndex: sync.1)
         pendingSync = nil
     }
-    let samples = decoder.feed(bytes)
-    guard !samples.isEmpty else { return }
+    let decoded = decoder.feed(bytes)
+    guard !decoded.isEmpty else { return }
+    let samples = pcm.process(decoded)
     samplesTotal += samples.count
     output?.push(samples)
 }

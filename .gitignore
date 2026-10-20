@@ -6,3 +6,4 @@ app/dist/
 app/Resources/AppIcon.iconset/
 tools/remote-mic/RemoteMic
 dist/
+tools/mic-gain/MicGain.app/
