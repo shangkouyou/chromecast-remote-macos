@@ -223,8 +223,8 @@ GVTV_AUDIO_DEVICE="Google TV 2ch" ./scripts/install-mic.sh
 
 调整方式（下一次按住语音键生效，无需重启桥）：
 
-- 打开 `~/Applications/MicGain.app`（源码在 `tools/mic-gain/`），拖滑块或点 `+14` / `+18`；
-- 或命令行：`./scripts/set-gain.sh 13`；
+- 打开 **Google TV Remote → 设置 → 麦克风增益**，拖滑块或点 `+13` / `+16` 预设；
+- 或命令行：`./scripts/set-gain.sh 13`（高级用法）；
 - 配置文件：`~/Library/Application Support/gvtv-remote/mic-config.json`。
 
 建议 **6–14 dB**。过高会放大底噪并削波（虚拟麦克风峰值接近 1.0 时识别反而变差）；

@@ -770,12 +770,15 @@ struct SettingsView: View {
     @State private var virtualName = ""
     @State private var endActions = ""
     @State private var address = ""
+    @State private var micGainDB = 10.0
+    @State private var gainStatus = ""
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 deviceCard
                 voiceCard
+                micGainCard
                 namingCard
                 configCard
                 aboutCard
@@ -786,6 +789,7 @@ struct SettingsView: View {
             virtualName = engine.config.virtualName
             endActions = engine.config.voice.endActions.joined(separator: ", ")
             address = engine.config.voice.bluetoothAddress
+            micGainDB = MicGainStore.load()
         }
     }
 
@@ -884,6 +888,39 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
             }
         }
+    }
+
+    private var micGainCard: some View {
+        Card("麦克风增益") {
+            HStack(spacing: 12) {
+                Text("增益").font(.system(size: 12))
+                Slider(value: $micGainDB, in: 0...24, step: 1, onEditingChanged: { editing in
+                    if !editing { saveMicGain() }
+                })
+                Text(String(format: "%+.0f dB", micGainDB))
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(width: 60, alignment: .trailing)
+            }
+            HStack(spacing: 8) {
+                ForEach([6, 10, 13, 16, 18], id: \.self) { value in
+                    Button("+\(value)") {
+                        micGainDB = Double(value)
+                        saveMicGain()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Spacer()
+                Text(gainStatus).font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            Text("默认 +10 dB（20 Hz 高通 + 三点平滑 + 增益 + 削波，对齐无线麦）。建议 6–14 dB；过高会放大底噪/削波。下一次按住语音键生效。")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func saveMicGain() {
+        _ = MicGainStore.save(micGainDB)
+        gainStatus = "已保存，下次按键生效"
     }
 
     private var namingCard: some View {

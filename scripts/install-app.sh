@@ -4,7 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/app/build.sh" >/dev/null
 
+osascript -e 'tell application "Google TV Remote" to quit' >/dev/null 2>&1 || true
+pkill -f "Google TV Remote.app/Contents/MacOS/GoogleTVRemote" >/dev/null 2>&1 || true
+sleep 1
+
 DEST="/Applications/Google TV Remote.app"
+rm -rf "$DEST" 2>/dev/null || true
 if ! cp -R "$ROOT/app/dist/Google TV Remote.app" "$DEST" 2>/dev/null; then
   DEST="$HOME/Applications/Google TV Remote.app"
   mkdir -p "$HOME/Applications"
