@@ -170,7 +170,7 @@ Report Descriptor 解析 ── 值 1..17 → usage 0x19E/0x42/…/0x89
 ## 4. 快速开始
 
 ```bash
-git clone https://github.com/Scu9277/gvtv-remote.git ~/gvtv-remote
+git clone https://github.com/shangkouyou/gvtv-remote.git ~/gvtv-remote
 cd ~/gvtv-remote
 
 ./scripts/install-app.sh     # 推荐：构建并安装原生 App
