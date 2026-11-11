@@ -170,8 +170,8 @@ Report Descriptor 解析 ── 值 1..17 → usage 0x19E/0x42/…/0x89
 ## 4. 快速开始
 
 ```bash
-git clone https://github.com/shangkouyou/gvtv-remote.git ~/gvtv-remote
-cd ~/gvtv-remote
+git clone https://github.com/shangkouyou/chromecast-remote-macos.git ~/chromecast-remote-macos
+cd ~/chromecast-remote-macos
 
 ./scripts/install-app.sh     # 推荐：构建并安装原生 App
 # 或使用命令行：

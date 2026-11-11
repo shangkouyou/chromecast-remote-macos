@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gvtv-remote"
-version = "1.2.0"
+version = "1.2.1"
 description = "Google TV / Chromecast Bluetooth remote -> macOS key mapper (Fn cloud key for dictation)"
 requires-python = ">=3.9"
 license = { text = "MIT" }

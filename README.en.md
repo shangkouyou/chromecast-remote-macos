@@ -20,8 +20,8 @@ to macOS actions, with an **Fn/Globe cloud key** for voice input and an optional
 ## Quick start
 
 ```bash
-git clone https://github.com/shangkouyou/gvtv-remote.git gvtv-remote
-cd gvtv-remote
+git clone https://github.com/shangkouyou/chromecast-remote-macos.git gvtv-remote
+cd chromecast-remote-macos
 ./scripts/install-app.sh          # build + install the native app
 ./scripts/install-app-login.sh    # optional: open at login
 ```
