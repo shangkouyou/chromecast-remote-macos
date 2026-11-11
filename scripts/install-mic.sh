@@ -48,6 +48,10 @@ launchctl bootstrap "gui/${UID_NUM}" "$PLIST"
 launchctl enable "gui/${UID_NUM}/${LABEL}"
 launchctl kickstart -k "gui/${UID_NUM}/${LABEL}"
 
+if [ -d "/Library/Input Methods/Chatterfly.app" ]; then
+  "$ROOT/scripts/set-ime-mic.sh" "$DEVICE" || true
+fi
+
 echo "已启动：遥控器麦克风 → ${DEVICE}"
 echo "在输入法/语音软件的麦克风里选择：${DEVICE}"
 echo "日志：~/Library/Logs/RemoteMic.log"
