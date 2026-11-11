@@ -251,6 +251,7 @@ tail -20 ~/Library/Logs/RemoteMic.log
 | 语音键突然失灵 | 蓝牙关/开（清 GATT 订阅会话）；确认没有其它 GATT 客户端 |
 | 语音能转文字但电脑没声音 | 系统输出被设成了虚拟声卡；改回真实扬声器/耳机 |
 | 虚拟麦克风没声音 | `launchctl kickstart -k gui/$(id -u)/com.gvtv.remote-mic`；看日志是否重新“已启动” |
+| 戴蓝牙耳机后语音不上屏 | 输入法改用了耳机麦克风；运行 `./scripts/set-ime-mic.sh "Google TV 2ch"` 固定为虚拟麦克风 |
 | 休眠/唤醒后语音失效 | v1.0.2 已自动重启桥并修正路由；若仍失效，`launchctl kickstart -k …` 并附日志 |
 | 音量/静音无效 | 先 `test-media volume_up`；仍无效改用 `shell:osascript …` |
 | 重新构建 App 后权限失效 | ad-hoc 签名导致，重新勾选一次；固定放在 /Applications |
