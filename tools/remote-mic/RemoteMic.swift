@@ -659,9 +659,8 @@ func handleControl(_ bytes: [UInt8]) {
     guard let first = bytes.first else { return }
     switch first {
     case 0x04:
-        output?.stop()
-        output = nil
-        if let id = findDevice(contains: options.deviceName) {
+        // 0x08 已预打开时直接复用，避免 IME 先开麦、桥后开管道造成的首句丢失。
+        if output == nil, let id = findDevice(contains: options.deviceName) {
             output = makeOutput(id)
             currentDeviceID = id
         }
@@ -679,6 +678,12 @@ func handleControl(_ bytes: [UInt8]) {
         pendingSync = nil
         sessionOpen = true
         log(String(format: "语音会话开始（ATVV），已打开按需虚拟管道，增益 %+.1f dB", micSettings.gainDB))
+    case 0x08:
+        if output == nil, let id = findDevice(contains: options.deviceName) {
+            output = makeOutput(id)
+            currentDeviceID = id
+            log("语音键 0x08：预打开虚拟管道")
+        }
     case 0x0A:
         if bytes.count >= 7 {
             let raw = Int16(bitPattern: UInt16(bytes[4]) << 8 | UInt16(bytes[5]))
